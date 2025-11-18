@@ -112,9 +112,28 @@ def get_slide(presentation_id: str, slide_number: int) -> dict:
                 if 'text' in shape:
                     # Aggregate all text runs
                     text_content = []
+                    has_bullets = False
+                    text_styles = []
+                    
                     for text_elem in shape['text'].get('textElements', []):
                         if 'textRun' in text_elem:
                             text_content.append(text_elem['textRun'].get('content', ''))
+                            
+                            # Capture text style info
+                            text_run = text_elem['textRun']
+                            style = text_run.get('style', {})
+                            if style:
+                                text_styles.append({
+                                    'bold': style.get('bold', False),
+                                    'italic': style.get('italic', False),
+                                    'fontSize': style.get('fontSize', {}).get('magnitude', 11)
+                                })
+                        
+                        # Check for bullet formatting
+                        if 'paragraphMarker' in text_elem:
+                            para_style = text_elem['paragraphMarker'].get('style', {})
+                            if para_style.get('bullet'):
+                                has_bullets = True
                     
                     text = ''.join(text_content).strip()
                     if text:
@@ -128,12 +147,27 @@ def get_slide(presentation_id: str, slide_number: int) -> dict:
                         elif 'BODY' in placeholder_type or 'SUBTITLE' in placeholder_type:
                             role = 'body'
                         
-                        elements.append({
+                        # Get positioning info
+                        transform = page_elem.get('transform', {})
+                        position = {
+                            'x': transform.get('translateX', 0),
+                            'y': transform.get('translateY', 0)
+                        }
+                        
+                        elem_info = {
                             'id': elem_id,
                             'type': 'text',
                             'role': role,
-                            'text': text
-                        })
+                            'text': text,
+                            'format': 'bullets' if has_bullets else 'plain',
+                            'position': position
+                        }
+                        
+                        # Add style info if we have it
+                        if text_styles:
+                            elem_info['style'] = text_styles[0]  # Use first style as representative
+                        
+                        elements.append(elem_info)
             
             # Images
             elif 'image' in page_elem:
@@ -176,7 +210,7 @@ def get_slide(presentation_id: str, slide_number: int) -> dict:
         raise
 
 
-def update_text(presentation_id: str, slide_number: int, element_id: str, text: str) -> dict:
+def update_text(presentation_id: str, slide_number: int, element_id: str, text: str, format: str = "plain") -> dict:
     """
     Update text in a specific element.
     
@@ -185,11 +219,12 @@ def update_text(presentation_id: str, slide_number: int, element_id: str, text: 
         slide_number: Slide number (1-indexed)
         element_id: Element object ID from get_slide
         text: New text content
+        format: Text format - "plain" (default) or "bullets"
         
     Returns:
         Success status
     """
-    log_message(f"Updating text in slide {slide_number}, element {element_id}")
+    log_message(f"Updating text in slide {slide_number}, element {element_id}, format: {format}")
     
     try:
         service = get_drive_service()
@@ -215,6 +250,18 @@ def update_text(presentation_id: str, slide_number: int, element_id: str, text: 
             }
         ]
         
+        # Apply bullet formatting if requested
+        if format == "bullets":
+            requests.append({
+                'createParagraphBullets': {
+                    'objectId': element_id,
+                    'textRange': {
+                        'type': 'ALL'
+                    },
+                    'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                }
+            })
+        
         with suppress_output():
             slides_service.presentations().batchUpdate(
                 presentationId=presentation_id,
@@ -236,7 +283,7 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
     Args:
         presentation_id: The presentation ID
         slide_number: Slide number (1-indexed)
-        elements: List of element updates [{"id": "...", "text": "..."}]
+        elements: List of element updates [{"id": "...", "text": "...", "format": "plain|bullets"}]
         
     Returns:
         Success status with count
@@ -252,6 +299,8 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
         requests = []
         for elem in elements:
             if 'id' in elem and 'text' in elem:
+                elem_format = elem.get('format', 'plain')
+                
                 # Delete existing text
                 requests.append({
                     'deleteText': {
@@ -267,6 +316,16 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
                         'insertionIndex': 0
                     }
                 })
+                
+                # Apply bullet formatting if requested
+                if elem_format == 'bullets':
+                    requests.append({
+                        'createParagraphBullets': {
+                            'objectId': elem['id'],
+                            'textRange': {'type': 'ALL'},
+                            'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                        }
+                    })
         
         if requests:
             with suppress_output():
@@ -285,12 +344,13 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
 
 def add_element(presentation_id: str, slide_number: int, element: dict) -> dict:
     """
-    Add a new element (image/table) to a slide.
+    Add a new element (image/table/chart) to a slide.
     
     Args:
         presentation_id: The presentation ID
         slide_number: Slide number (1-indexed)
-        element: Element spec {"type": "image", "url": "...", "position": "center"}
+        element: Element spec {"type": "image|table|chart", "url": "...", "position": "center", 
+                 "chart_type": "bar|line|scatter|pie", "chart_data": [...]}
         
     Returns:
         Success status with new element ID
@@ -383,6 +443,53 @@ def add_element(presentation_id: str, slide_number: int, element: dict) -> dict:
                     },
                     'rows': rows,
                     'columns': cols
+                }
+            })
+        
+        elif element.get('type') == 'chart':
+            # Chart creation - create a text box with structured data
+            # Full chart API requires Google Sheets integration, so we create a placeholder
+            chart_type = element.get('chart_type', 'bar')
+            chart_data = element.get('chart_data', [])
+            
+            # Create a shape (text box) to hold chart data
+            shape_id = elem_id
+            requests.append({
+                'createShape': {
+                    'objectId': shape_id,
+                    'shapeType': 'TEXT_BOX',
+                    'elementProperties': {
+                        'pageObjectId': page_id,
+                        'size': {
+                            'width': {'magnitude': size_width, 'unit': 'PT'},
+                            'height': {'magnitude': size_height, 'unit': 'PT'}
+                        },
+                        'transform': {
+                            'scaleX': 1,
+                            'scaleY': 1,
+                            'translateX': translate_x,
+                            'translateY': translate_y,
+                            'unit': 'PT'
+                        }
+                    }
+                }
+            })
+            
+            # Format chart data as text
+            if chart_data:
+                chart_text = f"Chart: {chart_type.upper()}\n\n"
+                for item in chart_data:
+                    label = item.get('label', '')
+                    value = item.get('value', 0)
+                    chart_text += f"{label}: {value}\n"
+            else:
+                chart_text = f"Chart placeholder: {chart_type}\n(Add data using chart_data parameter)"
+            
+            requests.append({
+                'insertText': {
+                    'objectId': shape_id,
+                    'text': chart_text,
+                    'insertionIndex': 0
                 }
             })
         

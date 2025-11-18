@@ -53,7 +53,7 @@ def get_slide(presentation_id: str, slide_number: int) -> dict:
 
 
 @mcp.tool()
-def update_text(presentation_id: str, slide_number: int, element_id: str, text: str) -> dict:
+def update_text(presentation_id: str, slide_number: int, element_id: str, text: str, format: str = "plain") -> dict:
     """
     Replace text in one element. Get element_id from get_slide. Supports \\n for line breaks.
     
@@ -62,8 +62,9 @@ def update_text(presentation_id: str, slide_number: int, element_id: str, text: 
         slide_number: Slide position (required, 1=first)
         element_id: Element ID like "shape1" from get_slide (required)
         text: New text content (required)
+        format: Text format (optional) - "plain" (default) or "bullets" for bullet lists
     """
-    return slides_tools.update_text(presentation_id, slide_number, element_id, text)
+    return slides_tools.update_text(presentation_id, slide_number, element_id, text, format)
 
 
 @mcp.tool()
@@ -74,27 +75,31 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
     Args:
         presentation_id: Google Slides ID (required)
         slide_number: Slide position (required)
-        elements: Array of updates (required) [{"id": "shape1", "text": "New"}, ...]
+        elements: Array of updates (required) [{"id": "shape1", "text": "New", "format": "plain|bullets"}, ...]
     """
     return slides_tools.replace_slide_elements(presentation_id, slide_number, elements)
 
 
 @mcp.tool()
-def add_element(presentation_id: str, slide_number: int, element_type: str, content: str = "", position: str = "center") -> dict:
+def add_element(presentation_id: str, slide_number: int, element_type: str, content: str = "", position: str = "center", chart_type: str = "", chart_data: list = []) -> dict:
     """
-    Insert image or table on slide. Returns new element_id.
+    Insert image, table, or chart on slide. Returns new element_id.
     
     Args:
         presentation_id: Google Slides ID (required)
         slide_number: Slide position (required)
-        element_type: "image" or "table" (required)
-        content: Image URL (optional, ignored for tables which create 2x2)
+        element_type: "image", "table", or "chart" (required)
+        content: Image URL (optional, for images only)
         position: "top", "center", or "bottom" (optional, default: "center")
+        chart_type: "bar", "line", "scatter", or "pie" (optional, for charts only)
+        chart_data: Chart data points (optional, for charts) [{"label": "A", "value": 10}, ...]
     """
     element = {
         'type': element_type,
         'url': content if element_type == 'image' and content else None,
-        'position': position
+        'position': position,
+        'chart_type': chart_type,
+        'chart_data': chart_data
     }
     return slides_tools.add_element(presentation_id, slide_number, element)
 
