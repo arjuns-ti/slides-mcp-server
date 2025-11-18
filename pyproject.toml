@@ -1,0 +1,30 @@
+[project]
+name = "slides-mcp"
+version = "0.1.0"
+description = "A FastMCP server for managing slide presentations"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=0.5.0",
+    "google-auth>=2.34.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-api-python-client>=2.149.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+slides-mcp = "src.server:main"
+
+[dependency-groups]
+dev = []
+
+[project.optional-dependencies]
+dev = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
