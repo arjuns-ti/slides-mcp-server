@@ -62,8 +62,9 @@ jobs:
                     "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
                     "tokenUrl": "https://oauth2.googleapis.com/token",
                     "scopes": {
-                      "https://www.googleapis.com/auth/drive.readonly": "Read files from Google Drive",
-                      "https://www.googleapis.com/auth/presentations": "Read and edit Google Slides presentations"
+                      "https://www.googleapis.com/auth/drive.readonly": "Read metadata from Google Drive",
+                      "https://www.googleapis.com/auth/drive.file": "Create and manage files created by the app",
+                      "https://www.googleapis.com/auth/presentations": "Read and edit Google Slides presentations (including text, formatting, elements, and slide management)"
                     }
                   }
                 }

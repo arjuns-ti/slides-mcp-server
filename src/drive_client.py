@@ -20,10 +20,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Google Drive and Slides API scopes
+# Required for reading presentations, editing content, and managing slides
 SCOPES = [
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.file',  # Read and write files we created
-    'https://www.googleapis.com/auth/presentations'  # Read and write access to presentations
+    'https://www.googleapis.com/auth/drive.readonly',  # Read metadata from Google Drive
+    'https://www.googleapis.com/auth/drive.file',      # Create and manage files created by the app
+    'https://www.googleapis.com/auth/presentations'    # Full read/write access to presentations
 ]
 
 
@@ -133,7 +134,6 @@ def get_drive_service():
                 # Step 1: Generate and log the authorization URL
                 auth_url, state = flow.authorization_url(
                     access_type='offline',
-                    include_granted_scopes='true',
                     prompt='consent'
                 )
                 

@@ -4,8 +4,11 @@ A FastMCP server for verifying Google Slides files in Google Drive using the Mod
 
 ## Features
 
-- **Tools**: Check if files exist in Google Drive and verify they are Google Slides presentations
-- **OAuth Authentication**: Secure Google Drive API access with read-only permissions
+- **Presentation Management**: Read, edit, and manage Google Slides presentations
+- **Text Editing**: Update text with full formatting control (bold, colors, fonts, alignment, etc.)
+- **Element Management**: Add images, tables, charts, and bullets to slides
+- **Slide Operations**: Duplicate slides and manage presentation structure
+- **OAuth Authentication**: Secure Google API access with presentations read/write permissions
 - **Logging**: Optional file-based logging system
 - **No Console Output**: All logging goes to `logs.txt` for debugging
 
@@ -14,8 +17,12 @@ A FastMCP server for verifying Google Slides files in Google Drive using the Mod
 1. **Google Cloud Project Setup**:
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
    - Create a new project or select an existing one
-   - Enable the Google Drive API
+   - Enable the Google Drive API and Google Slides API
    - Create OAuth 2.0 credentials (Desktop app)
+   - Configure OAuth consent screen with the following scopes:
+     - `https://www.googleapis.com/auth/drive.readonly`
+     - `https://www.googleapis.com/auth/drive.file`
+     - `https://www.googleapis.com/auth/presentations`
    - Download the credentials JSON file
 
 2. **UV Package Manager**:
@@ -181,8 +188,12 @@ On first run, the server will:
 ## Security Notes
 
 - Never commit your `.env` file, `credentials.json`, or `token.json` to version control
-- The OAuth token provides read-only access to your Google Drive
+- The OAuth token provides:
+  - Read-only access to Google Drive metadata
+  - Create and manage files created or opened by the app
+  - Full read/write access to Google Slides presentations
 - Logs may contain sensitive information - keep `logs.txt` secure
+- Review and approve OAuth consent screen to control which presentations the server can access
 
 ## License
 
