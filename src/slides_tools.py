@@ -321,43 +321,18 @@ def get_slide(presentation_id: str, slide_number: int) -> dict:
         raise
 
 
-def update_text(presentation_id: str, slide_number: int, element_id: str, text: str, 
-                text_style: dict = None, paragraph_style: dict = None) -> dict:
+def update_text(presentation_id: str, slide_number: int, element_id: str, text: str) -> dict:
     """
-    Update text in a specific element with full formatting control.
-    If formatting is not provided, existing formatting is preserved.
+    Update text in a specific element while preserving existing formatting.
     
     Args:
         presentation_id: The presentation ID
         slide_number: Slide number (1-indexed)
         element_id: Element object ID from get_slide
         text: New text content
-        text_style: Optional dict with text formatting. If not provided, preserves existing formatting.
-            Supports all Google Slides API TextStyle fields:
-            - bold, italic, underline, strikethrough (bool)
-            - fontSize: {"magnitude": number, "unit": "PT"}
-            - fontFamily (string) or weightedFontFamily: {"fontFamily": str, "weight": 100-900}
-            - smallCaps (bool)
-            - baselineOffset: "SUPERSCRIPT", "SUBSCRIPT", or "NONE"
-            - foregroundColor, backgroundColor: {"opaqueColor": {"rgbColor": {"red": 0-1, "green": 0-1, "blue": 0-1}}}
-            - link: {"url": string}
-        paragraph_style: Optional dict with paragraph formatting. If not provided, preserves existing formatting.
-            Supports all Google Slides API ParagraphStyle fields:
-            - alignment: "START", "CENTER", "END", "JUSTIFIED"
-            - lineSpacing (number: percentage, e.g., 115 for 1.15 spacing)
-            - spaceAbove, spaceBelow, indentStart, indentEnd, indentFirstLine: {"magnitude": number, "unit": "PT"}
-            - direction: "LEFT_TO_RIGHT" or "RIGHT_TO_LEFT"
-            - spacingMode: "NEVER_COLLAPSE" or "COLLAPSE_LISTS"
         
     Returns:
         Success status
-        
-    Example text_style:
-        {"bold": True, "fontSize": {"magnitude": 24, "unit": "PT"}, 
-         "foregroundColor": {"opaqueColor": {"rgbColor": {"red": 1, "green": 0, "blue": 0}}}}
-    
-    Example paragraph_style:
-        {"alignment": "CENTER", "lineSpacing": 150, "spaceAbove": {"magnitude": 10, "unit": "PT"}}
     """
     log_message(f"Updating text in slide {slide_number}, element {element_id}")
     
@@ -366,88 +341,28 @@ def update_text(presentation_id: str, slide_number: int, element_id: str, text: 
         creds = service._credentials
         slides_service = get_slides_service(creds)
         
-        # If no styles provided, we need to preserve existing formatting
-        existing_text_style = None
-        existing_para_style = None
-        
-        if text_style is None or paragraph_style is None:
-            # Get current formatting to preserve it
-            with suppress_output():
-                presentation = slides_service.presentations().get(
-                    presentationId=presentation_id
-                ).execute()
-            
-            # Find the element and extract its current formatting
-            for slide in presentation.get('slides', []):
-                for page_elem in slide.get('pageElements', []):
-                    if page_elem.get('objectId') == element_id:
-                        if 'shape' in page_elem and 'text' in page_elem['shape']:
-                            text_elements = page_elem['shape']['text'].get('textElements', [])
-                            for text_elem in text_elements:
-                                # Get first text run style if no text_style provided
-                                if text_style is None and 'textRun' in text_elem:
-                                    style = text_elem['textRun'].get('style', {})
-                                    if style:
-                                        existing_text_style = style
-                                
-                                # Get paragraph style if no paragraph_style provided
-                                if paragraph_style is None and 'paragraphMarker' in text_elem:
-                                    para = text_elem['paragraphMarker'].get('style', {})
-                                    if para:
-                                        existing_para_style = para
-                                
-                                if existing_text_style and existing_para_style:
-                                    break
-                        break
-                if existing_text_style or existing_para_style:
-                    break
-        
         # Build the update request
+        # IMPORTANT: Insert new text FIRST, then delete old text
+        # This preserves formatting by keeping text in the element at all times
+        # By inserting first, the new text inherits the existing formatting
         requests = [
-            {
-                'deleteText': {
-                    'objectId': element_id,
-                    'textRange': {
-                        'type': 'ALL'
-                    }
-                }
-            },
             {
                 'insertText': {
                     'objectId': element_id,
                     'text': text,
                     'insertionIndex': 0
                 }
+            },
+            {
+                'deleteText': {
+                    'objectId': element_id,
+                    'textRange': {
+                        'type': 'FROM_START_INDEX',
+                        'startIndex': len(text)
+                    }
+                }
             }
         ]
-        
-        # Apply text style: use provided style, or fall back to existing
-        style_to_apply = text_style if text_style is not None else existing_text_style
-        if style_to_apply:
-            # Get all fields from the style dict
-            fields = ','.join(style_to_apply.keys())
-            requests.append({
-                'updateTextStyle': {
-                    'objectId': element_id,
-                    'textRange': {'type': 'ALL'},
-                    'style': style_to_apply,
-                    'fields': fields
-                }
-            })
-        
-        # Apply paragraph style: use provided style, or fall back to existing
-        para_to_apply = paragraph_style if paragraph_style is not None else existing_para_style
-        if para_to_apply:
-            # Get all fields from the style dict
-            fields = ','.join(para_to_apply.keys())
-            requests.append({
-                'updateParagraphStyle': {
-                    'objectId': element_id,
-                    'textRange': {'type': 'ALL'},
-                    'style': para_to_apply,
-                    'fields': fields
-                }
-            })
         
         with suppress_output():
             slides_service.presentations().batchUpdate(
@@ -465,27 +380,22 @@ def update_text(presentation_id: str, slide_number: int, element_id: str, text: 
 
 def replace_slide_elements(presentation_id: str, slide_number: int, elements: list) -> dict:
     """
-    Bulk update multiple elements on a slide with full formatting control.
-    If formatting is not provided for an element, existing formatting is preserved.
+    Bulk update multiple elements on a slide while preserving existing formatting.
     
     Args:
         presentation_id: The presentation ID
         slide_number: Slide number (1-indexed)
-        elements: List of element updates. Each element can have:
+        elements: List of element updates. Each element must have:
             - id (required): Element ID from get_slide
             - text (required): New text content
-            - text_style (optional): Dict with text formatting. If not provided, preserves existing.
-            - paragraph_style (optional): Dict with paragraph formatting. If not provided, preserves existing.
         
     Returns:
         Success status with count
         
     Example elements:
         [
-            {"id": "shape1", "text": "Bold Title", 
-             "text_style": {"bold": True, "fontSize": {"magnitude": 32, "unit": "PT"}}},
-            {"id": "shape2", "text": "Centered text", 
-             "paragraph_style": {"alignment": "CENTER"}}
+            {"id": "shape1", "text": "Updated Title"},
+            {"id": "shape2", "text": "Updated text"}
         ]
     """
     log_message(f"Bulk updating {len(elements)} elements on slide {slide_number}")
@@ -495,99 +405,35 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
         creds = service._credentials
         slides_service = get_slides_service(creds)
         
-        # Get presentation to extract existing formatting if needed
-        with suppress_output():
-            presentation = slides_service.presentations().get(
-                presentationId=presentation_id
-            ).execute()
-        
-        # Build a map of element IDs to their existing styles
-        existing_styles = {}
-        for slide in presentation.get('slides', []):
-            for page_elem in slide.get('pageElements', []):
-                elem_id = page_elem.get('objectId')
-                if 'shape' in page_elem and 'text' in page_elem['shape']:
-                    text_elements = page_elem['shape']['text'].get('textElements', [])
-                    text_style = None
-                    para_style = None
-                    
-                    for text_elem in text_elements:
-                        if text_style is None and 'textRun' in text_elem:
-                            style = text_elem['textRun'].get('style', {})
-                            if style:
-                                text_style = style
-                        
-                        if para_style is None and 'paragraphMarker' in text_elem:
-                            para = text_elem['paragraphMarker'].get('style', {})
-                            if para:
-                                para_style = para
-                        
-                        if text_style and para_style:
-                            break
-                    
-                    existing_styles[elem_id] = {
-                        'text_style': text_style,
-                        'paragraph_style': para_style
-                    }
-        
         # Build batch requests for all text updates
+        # IMPORTANT: Insert new text FIRST, then delete old text
+        # This preserves formatting by keeping text in the element at all times
+        # By inserting first, the new text inherits the existing formatting
         requests = []
         for elem in elements:
             if 'id' in elem and 'text' in elem:
                 elem_id = elem['id']
+                new_text = elem['text']
                 
-                # Delete existing text
-                requests.append({
-                    'deleteText': {
-                        'objectId': elem_id,
-                        'textRange': {'type': 'ALL'}
-                    }
-                })
-                
-                # Insert new text
+                # Insert new text at the beginning
                 requests.append({
                     'insertText': {
                         'objectId': elem_id,
-                        'text': elem['text'],
+                        'text': new_text,
                         'insertionIndex': 0
                     }
                 })
                 
-                # Determine which text style to apply
-                text_style_to_apply = None
-                if 'text_style' in elem and elem['text_style']:
-                    text_style_to_apply = elem['text_style']
-                elif elem_id in existing_styles and existing_styles[elem_id]['text_style']:
-                    text_style_to_apply = existing_styles[elem_id]['text_style']
-                
-                if text_style_to_apply:
-                    fields = ','.join(text_style_to_apply.keys())
-                    requests.append({
-                        'updateTextStyle': {
-                            'objectId': elem_id,
-                            'textRange': {'type': 'ALL'},
-                            'style': text_style_to_apply,
-                            'fields': fields
+                # Delete old text (everything after the new text)
+                requests.append({
+                    'deleteText': {
+                        'objectId': elem_id,
+                        'textRange': {
+                            'type': 'FROM_START_INDEX',
+                            'startIndex': len(new_text)
                         }
-                    })
-                
-                # Determine which paragraph style to apply
-                para_style_to_apply = None
-                if 'paragraph_style' in elem and elem['paragraph_style']:
-                    para_style_to_apply = elem['paragraph_style']
-                elif elem_id in existing_styles and existing_styles[elem_id]['paragraph_style']:
-                    para_style_to_apply = existing_styles[elem_id]['paragraph_style']
-                
-                if para_style_to_apply:
-                    fields = ','.join(para_style_to_apply.keys())
-                    requests.append({
-                        'updateParagraphStyle': {
-                            'objectId': elem_id,
-                            'textRange': {'type': 'ALL'},
-                            'style': para_style_to_apply,
-                            'fields': fields
-                        }
-                    })
+                    }
+                })
         
         if requests:
             with suppress_output():
@@ -601,71 +447,6 @@ def replace_slide_elements(presentation_id: str, slide_number: int, elements: li
     
     except Exception as e:
         log_message(f"ERROR replacing elements: {str(e)}")
-        raise
-
-
-def update_bullets(presentation_id: str, element_id: str, action: str = "create", 
-                   bullet_preset: str = "BULLET_DISC_CIRCLE_SQUARE") -> dict:
-    """
-    Create or remove bullet formatting on a text element.
-    
-    Args:
-        presentation_id: The presentation ID
-        element_id: Element object ID from get_slide
-        action: "create" to add bullets, "delete" to remove bullets
-        bullet_preset: Bullet style (only used when action="create"). Options:
-            - BULLET_DISC_CIRCLE_SQUARE (default)
-            - BULLET_DIAMONDX_ARROW3D_SQUARE
-            - BULLET_CHECKBOX
-            - BULLET_ARROW_DIAMOND_DISC
-            - NUMBERED_DECIMAL_ALPHA_ROMAN (1, a, i)
-            - NUMBERED_DECIMAL_ALPHA_ROMAN_PARENS (1), a), i))
-            - NUMBERED_DECIMAL_NESTED (1, 1.1, 1.1.1)
-            - NUMBERED_UPPERALPHA_ALPHA_ROMAN (A, a, i)
-            - NUMBERED_UPPERROMAN_UPPERALPHA_DECIMAL (I, A, 1)
-            - NUMBERED_ZERODECIMAL_ALPHA_ROMAN (01, a, i)
-        
-    Returns:
-        Success status
-    """
-    log_message(f"Updating bullets on element {element_id}: {action} with preset {bullet_preset}")
-    
-    try:
-        service = get_drive_service()
-        creds = service._credentials
-        slides_service = get_slides_service(creds)
-        
-        requests = []
-        
-        if action == "create":
-            requests.append({
-                'createParagraphBullets': {
-                    'objectId': element_id,
-                    'textRange': {'type': 'ALL'},
-                    'bulletPreset': bullet_preset
-                }
-            })
-        elif action == "delete":
-            requests.append({
-                'deleteParagraphBullets': {
-                    'objectId': element_id,
-                    'textRange': {'type': 'ALL'}
-                }
-            })
-        else:
-            raise ValueError(f"Invalid action: {action}. Must be 'create' or 'delete'")
-        
-        with suppress_output():
-            slides_service.presentations().batchUpdate(
-                presentationId=presentation_id,
-                body={'requests': requests}
-            ).execute()
-        
-        log_message(f"Successfully updated bullets on element {element_id}")
-        return {'success': True}
-    
-    except Exception as e:
-        log_message(f"ERROR updating bullets: {str(e)}")
         raise
 
 
