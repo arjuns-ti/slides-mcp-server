@@ -22,6 +22,7 @@ load_dotenv()
 # Google Drive and Slides API scopes
 SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/drive.file',  # Read and write files we created
     'https://www.googleapis.com/auth/presentations'  # Read and write access to presentations
 ]
 
