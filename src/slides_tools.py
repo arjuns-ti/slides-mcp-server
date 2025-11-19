@@ -101,67 +101,212 @@ def get_slide(presentation_id: str, slide_number: int) -> dict:
         
         slide = slides[slide_number - 1]
         
-        # Extract elements in simplified format
-        elements = []
-        for page_elem in slide.get('pageElements', []):
+        # Helper function to process a single element
+        def process_element(page_elem, is_grouped=False):
             elem_id = page_elem.get('objectId')
             
-            # Text elements (shapes with text)
+            # Debug: Log all page elements to see what we're getting
+            log_message(f"Processing element {elem_id}: {list(page_elem.keys())}, grouped={is_grouped}")
+            
+            # Text elements (shapes with text or textboxes)
             if 'shape' in page_elem:
                 shape = page_elem['shape']
+                shape_type = shape.get('shapeType', '')
+                log_message(f"Shape {elem_id}: type={shape_type}, has_text={'text' in shape}, has_placeholder={bool(shape.get('placeholder'))}")
+                
+                # Process all shapes that can contain text (including empty ones)
+                text_content = []
+                has_bullets = False
+                text_styles = []
+                paragraph_styles = []
+                
                 if 'text' in shape:
-                    # Aggregate all text runs
-                    text_content = []
                     for text_elem in shape['text'].get('textElements', []):
                         if 'textRun' in text_elem:
                             text_content.append(text_elem['textRun'].get('content', ''))
+                            
+                            # Capture comprehensive text style info
+                            text_run = text_elem['textRun']
+                            style = text_run.get('style', {})
+                            if style:
+                                style_info = {
+                                    'bold': style.get('bold', False),
+                                    'italic': style.get('italic', False),
+                                    'underline': style.get('underline', False),
+                                    'strikethrough': style.get('strikethrough', False),
+                                    'fontSize': style.get('fontSize', {}).get('magnitude'),
+                                    'fontFamily': style.get('fontFamily'),
+                                    'weightedFontFamily': style.get('weightedFontFamily', {}).get('fontFamily'),
+                                    'fontWeight': style.get('weightedFontFamily', {}).get('weight'),
+                                    'smallCaps': style.get('smallCaps', False),
+                                    'baselineOffset': style.get('baselineOffset')  # SUPERSCRIPT, SUBSCRIPT, NONE
+                                }
+                                
+                                # Color information
+                                if 'foregroundColor' in style:
+                                    fg_color = style['foregroundColor'].get('opaqueColor', {})
+                                    if 'rgbColor' in fg_color:
+                                        rgb = fg_color['rgbColor']
+                                        style_info['foregroundColor'] = {
+                                            'red': rgb.get('red', 0),
+                                            'green': rgb.get('green', 0),
+                                            'blue': rgb.get('blue', 0)
+                                        }
+                                
+                                if 'backgroundColor' in style:
+                                    bg_color = style['backgroundColor'].get('opaqueColor', {})
+                                    if 'rgbColor' in bg_color:
+                                        rgb = bg_color['rgbColor']
+                                        style_info['backgroundColor'] = {
+                                            'red': rgb.get('red', 0),
+                                            'green': rgb.get('green', 0),
+                                            'blue': rgb.get('blue', 0)
+                                        }
+                                
+                                # Link information
+                                if 'link' in style:
+                                    style_info['link'] = style['link'].get('url')
+                                
+                                text_styles.append(style_info)
+                        
+                        # Check for paragraph formatting
+                        if 'paragraphMarker' in text_elem:
+                            para_style = text_elem['paragraphMarker'].get('style', {})
+                            if para_style.get('bullet'):
+                                has_bullets = True
+                            
+                            # Capture comprehensive paragraph style
+                            para_info = {
+                                'alignment': para_style.get('alignment'),  # START, CENTER, END, JUSTIFIED
+                                'lineSpacing': para_style.get('lineSpacing'),
+                                'spaceAbove': para_style.get('spaceAbove', {}).get('magnitude'),
+                                'spaceBelow': para_style.get('spaceBelow', {}).get('magnitude'),
+                                'indentStart': para_style.get('indentStart', {}).get('magnitude'),
+                                'indentEnd': para_style.get('indentEnd', {}).get('magnitude'),
+                                'indentFirstLine': para_style.get('indentFirstLine', {}).get('magnitude'),
+                                'direction': para_style.get('direction'),  # LEFT_TO_RIGHT, RIGHT_TO_LEFT
+                                'spacingMode': para_style.get('spacingMode')  # NEVER_COLLAPSE, COLLAPSE_LISTS
+                            }
+                            
+                            # Bullet information
+                            if para_style.get('bullet'):
+                                bullet = para_style['bullet']
+                                para_info['bullet'] = {
+                                    'listId': bullet.get('listId'),
+                                    'nestingLevel': bullet.get('nestingLevel', 0),
+                                    'glyph': bullet.get('glyph')
+                                }
+                            
+                            paragraph_styles.append(para_info)
+                
+                text = ''.join(text_content).strip()
+                
+                # Include all text-capable shapes, even if empty
+                # This includes TEXT_BOX, RECTANGLE (with text), and placeholder shapes
+                is_text_shape = (
+                    shape_type == 'TEXT_BOX' or 
+                    'text' in shape or 
+                    shape.get('placeholder')
+                )
+                
+                if is_text_shape:
+                    # Detect role (title vs body) based on placeholder type
+                    role = 'text'
+                    placeholder = shape.get('placeholder', {})
+                    placeholder_type = placeholder.get('type', '')
                     
-                    text = ''.join(text_content).strip()
-                    if text:
-                        # Detect role (title vs body) based on placeholder type
-                        role = 'text'
-                        placeholder = shape.get('placeholder', {})
-                        placeholder_type = placeholder.get('type', '')
-                        
-                        if 'TITLE' in placeholder_type or 'CENTERED_TITLE' in placeholder_type:
-                            role = 'title'
-                        elif 'BODY' in placeholder_type or 'SUBTITLE' in placeholder_type:
-                            role = 'body'
-                        
-                        elements.append({
-                            'id': elem_id,
-                            'type': 'text',
-                            'role': role,
-                            'text': text
-                        })
+                    if 'TITLE' in placeholder_type or 'CENTERED_TITLE' in placeholder_type:
+                        role = 'title'
+                    elif 'BODY' in placeholder_type or 'SUBTITLE' in placeholder_type:
+                        role = 'body'
+                    elif shape_type == 'TEXT_BOX':
+                        role = 'textbox'
+                    
+                    # Get positioning info
+                    transform = page_elem.get('transform', {})
+                    position = {
+                        'x': transform.get('translateX', 0),
+                        'y': transform.get('translateY', 0)
+                    }
+                    
+                    elem_info = {
+                        'id': elem_id,
+                        'type': 'text',
+                        'role': role,
+                        'text': text,  # Will be empty string for empty textboxes
+                        'format': 'bullets' if has_bullets else 'plain',
+                        'position': position
+                    }
+                    
+                    # Add comprehensive style info if we have it
+                    if text_styles:
+                        elem_info['textStyles'] = text_styles  # All text run styles
+                    
+                    # Add paragraph style info
+                    if paragraph_styles:
+                        elem_info['paragraphStyles'] = paragraph_styles
+                    
+                    log_message(f"Adding text element: {elem_id}, role={role}, text_length={len(text)}")
+                    return elem_info
+                else:
+                    log_message(f"Skipping shape {elem_id}: not a text shape (type={shape_type})")
+                    return None
             
             # Images
             elif 'image' in page_elem:
                 image = page_elem['image']
-                elements.append({
+                return {
                     'id': elem_id,
                     'type': 'image',
                     'url': image.get('contentUrl', '')
-                })
+                }
             
             # Tables
             elif 'table' in page_elem:
                 table = page_elem['table']
-                elements.append({
+                return {
                     'id': elem_id,
                     'type': 'table',
                     'rows': table.get('rows', 0),
                     'cols': table.get('columns', 0)
-                })
+                }
             
             # Videos
             elif 'video' in page_elem:
                 video = page_elem['video']
-                elements.append({
+                return {
                     'id': elem_id,
                     'type': 'video',
                     'url': video.get('url', '')
-                })
+                }
+            
+            # Element groups (containers with multiple elements)
+            elif 'elementGroup' in page_elem:
+                log_message(f"Processing element group {elem_id}")
+                group_elements = []
+                for child_elem in page_elem['elementGroup'].get('children', []):
+                    result = process_element(child_elem, is_grouped=True)
+                    if result:
+                        # Handle nested groups (result could be a list)
+                        if isinstance(result, list):
+                            group_elements.extend(result)
+                        else:
+                            group_elements.append(result)
+                log_message(f"Element group {elem_id} contains {len(group_elements)} elements")
+                return group_elements  # Return list of elements
+            
+            return None
+        
+        # Extract elements in simplified format
+        elements = []
+        for page_elem in slide.get('pageElements', []):
+            result = process_element(page_elem)
+            if result:
+                # Handle both single elements and lists (from groups)
+                if isinstance(result, list):
+                    elements.extend(result)
+                else:
+                    elements.append(result)
         
         log_message(f"Retrieved slide {slide_number} with {len(elements)} elements")
         
